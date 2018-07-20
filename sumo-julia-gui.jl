@@ -2,6 +2,7 @@ NUMSTUDY = 100
 include("constants.jl")
 include("rendering.jl")
 using PyCall
+unshift!(PyVector(pyimport("sys")["path"]), os.path[:join](SUMO_HOME, "tools"))
 @pyimport sys
 @pyimport os
 @pyimport traci
@@ -10,7 +11,11 @@ using PyCall
 screen_width = 1000
 screen_height = 1000
 world_width = XBOUNDRIGHT-XBOUNDLEFT
-scale = screen_width/world_width
+world_widthx = XBOUNDRIGHT-XBOUNDLEFT
+scalex = screen_width/world_widthx
+world_widthy = YBOUNDTOP-YBOUNDBOT
+scaley = screen_width/world_widthy
+
 
 type Status
  start::String
@@ -47,13 +52,13 @@ type CarHandler
 end
 function update_geom(handler::CarHandler, id::Int, x::Float64, y::Float64, cidx::Int)
     if id > length(handler.xs)
-        push!(handler.xs, x*scale-5)
-        push!(handler.ys, y*scale+45)
+        push!(handler.xs, x*scalex-5)
+        push!(handler.ys, y*scaley+45)
         push!(handler.cidxs, cidx)
         push!(handler.isshowns, true)
     else
-        handler.xs[id] = x*scale-5
-        handler.ys[id] = y*scale+45
+        handler.xs[id] = x*scalex-5
+        handler.ys[id] = y*scaley+45
         handler.cidxs[id] = cidx
     end
 end
@@ -62,7 +67,7 @@ vehicleVisual = Dict()
 backgroundStatus = Dict()
 netStatus = Dict()
 
-ANNARBOR = sumolib.net[:readNet]("/media/mSATA/UM/Simulation/AnnArbor3.net.xml")
+ANNARBOR = sumolib.net[:readNet]("/media/mSATA/UM/Simulation/f_AnnArbor1.6.net.xml")
 EDGES = ANNARBOR[:getEdges]()
 function _checkBackInitialPositions(vehicleID, start, dest, edge, pos, time, speed)
  if !(vehicleID in keys(backgroundStatus))
@@ -83,94 +88,100 @@ function _checkInitialPositions(vehicleID, start, dest, edge, pos, time, speed, 
   end
  end
 end
-function _create_visual_car(x,y)
-    car = Image("/home/boqi/Pictures/noun_Car_982516.png", 10, 10, x, y)
-    return car
-end
+
 function doStep(viewer, cars, carhandler)
- traci.simulationStep()
- moveNodes = []
- subscribes = traci.vehicle[:getSubscriptionResults]()
- #println(length(subscribes))
- time = traci.simulation[:getCurrentTime]()
- #if (time/1000)%(600) == 0
- # println(time/1000)
- #end
- #println("Current time is : $time.")
- #println(departed)
- if time >= 7*3600*1000
-  count = 0
-  for (veh, subs) in subscribes
-      if count <= 400
-   route = traci.vehicle[:getRoute](veh)
-   speed = traci.vehicle[:getSpeed](veh)
-   pos = traci.vehicle[:getPosition](veh)
-   push!(moveNodes, (veh, route[1], route[end], subs[tc.VAR_ROAD_ID], pos, speed))
-   count = count + 1
-   end
-  end
-  departed = traci.simulation[:getSubscriptionResults]()[tc.VAR_DEPARTED_VEHICLES_IDS]
-  arrived = traci.simulation[:getSubscriptionResults]()[tc.VAR_ARRIVED_VEHICLES_IDS]
-  #println(arrived)
-  for v in departed
-   traci.vehicle[:subscribe](v)
-   subs = traci.vehicle[:getSubscriptionResults](v)
-   route = traci.vehicle[:getRoute](v)
-   speed = traci.vehicle[:getSpeed](v)
-   pos = traci.vehicle[:getPosition](v)
-   push!(moveNodes, (v, route[1], route[end], subs[tc.VAR_ROAD_ID], pos, speed))
-  end
-
- end
- if time >= 7*3600*1000
-  for (vehicleID, start, dest, edge, pos, speed) in moveNodes
-   _checkInitialPositions(vehicleID, start, dest, edge, pos, time, speed, viewer, cars, carhandler)
-   if vehicleID in keys(vehicleStatus)
-    # make sure this is the studied vehicle
-    if vehicleStatus[vehicleID].arrived != true
-     #push!(vehicleStatus[vehicleID].step, Int(time/1000))
-     #push!(vehicleStatus[vehicleID].edge, edge)
-     x = pos[1]*scale-5
-     y = pos[2]*scale+45
-     if (carhandler.xs[vehicleVisual[vehicleID]]-x)^2 + (carhandler.ys[vehicleVisual[vehicleID]]-y)^2 > 25
-        #cars[:update_geom](vehicleVisual[vehicleID], x, y, 1)
-        update_geom(carhandler, vehicleVisual[vehicleID], pos[1], pos[2], 1)
-        #cars[:handler] = carhandler
-        #vehicleVisual[vehicleID][:x] = x
-        #vehicleVisual[vehicleID][:y] = y
-     end
+    traci.simulationStep()
+    #moveNodes = []
+    subscribes = traci.vehicle[:getSubscriptionResults]()
+    time = traci.simulation[:getCurrentTime]()
+    #=
+    count = 0
+    for (veh, subs) in subscribes
+        if count <= 400
+            route = traci.vehicle[:getRoute](veh)
+            speed = traci.vehicle[:getSpeed](veh)
+            pos = traci.vehicle[:getPosition](veh)
+            #push!(moveNodes, (veh, route[1], route[end], subs[tc.VAR_ROAD_ID], pos, speed))
+            count = count + 1
+        end
     end
-   end
-  end
- end
-for vehicleID in keys(vehicleStatus)
- if vehicleID in arrived && vehicleStatus[vehicleID].arrived==false
-  vehicleStatus[vehicleID].arrived = true
-  carhandler.isshowns[vehicleVisual[vehicleID]] = false
-  #assert(cars[:handler].isshowns[vehicleVisual[vehicleID]] == false)
-  #vehicleVisual[vehicleID][:isshown] = false
- end
-end
+    =#
+    departed = traci.simulation[:getSubscriptionResults]()[tc.VAR_DEPARTED_VEHICLES_IDS]
+    arrived = traci.simulation[:getSubscriptionResults]()[tc.VAR_ARRIVED_VEHICLES_IDS]
+    for v in departed
+        traci.vehicle[:subscribe](v)
+        #subs = traci.vehicle[:getSubscriptionResults](v)
+        route = traci.vehicle[:getRoute](v)
+        speed = traci.vehicle[:getSpeed](v)
+        pos = traci.vehicle[:getPosition](v)
+        start = route[1]
+        dest = route[end]
+        edge = traci.vehicle[:getRoadID](v)
+        #push!(moveNodes, (v, route[1], route[end], subs[tc.VAR_ROAD_ID], pos, speed))
+        _checkInitialPositions(v, start, dest, edge, pos, time, speed, viewer, cars, carhandler)
+    end
+    for vehicleID in keys(vehicleStatus)
+        if vehicleID in arrived && vehicleStatus[vehicleID].arrived==false
+            vehicleStatus[vehicleID].arrived = true
+            carhandler.isshowns[vehicleVisual[vehicleID]] = false
+        end
+        if !vehicleStatus[vehicleID].arrived
+            #vehicles still running
+            speed = traci.vehicle[:getSpeed](vehicleID)
+            pos = traci.vehicle[:getPosition](vehicleID)
+            #edge = traci.vehicle[:getRoadID](vehicleID)
+            #push!(vehicleStatus[vehicleID].edge, edge)
+            x = pos[1]*scalex-5
+            y = pos[2]*scaley+45
+            if (carhandler.xs[vehicleVisual[vehicleID]]-x)^2 + (carhandler.ys[vehicleVisual[vehicleID]]-y)^2 > 25
+                #cars[:update_geom](vehicleVisual[vehicleID], x, y, 1)
+                update_geom(carhandler, vehicleVisual[vehicleID], pos[1], pos[2], 1)
+                #cars[:handler] = carhandler
+                #vehicleVisual[vehicleID][:x] = x
+                #vehicleVisual[vehicleID][:y] = y
+            end
+        end
+    end
+    #=
+    for (vehicleID, start, dest, edge, pos, speed) in moveNodes
+        #_checkInitialPositions(vehicleID, start, dest, edge, pos, time, speed, viewer, cars, carhandler)
+        if vehicleID in keys(vehicleStatus)
+            # make sure this is the studied vehicle
+            #push!(vehicleStatus[vehicleID].step, Int(time/1000))
+            #push!(vehicleStatus[vehicleID].edge, edge)
+            x = pos[1]*scale-5
+            y = pos[2]*scale+45
+            if (carhandler.xs[vehicleVisual[vehicleID]]-x)^2 + (carhandler.ys[vehicleVisual[vehicleID]]-y)^2 > 25
+                #cars[:update_geom](vehicleVisual[vehicleID], x, y, 1)
+                update_geom(carhandler, vehicleVisual[vehicleID], pos[1], pos[2], 1)
+                #cars[:handler] = carhandler
+                #vehicleVisual[vehicleID][:x] = x
+                #vehicleVisual[vehicleID][:y] = y
+            end
+        end
+    end
 
+    for vehicleID in keys(vehicleStatus)
+        if vehicleID in arrived && vehicleStatus[vehicleID].arrived==false
+            vehicleStatus[vehicleID].arrived = true
+            carhandler.isshowns[vehicleVisual[vehicleID]] = false
+            #assert(cars[:handler].isshowns[vehicleVisual[vehicleID]] == false)
+            #vehicleVisual[vehicleID][:isshown] = false
+        end
+    end
+    =#
 end
 function main(T)
  sumoExe = SUMO
- sumoConfig = "AnnArbor.sumocfg"
+ sumoConfig = SUMO_CONFIG
  traci.start([sumoExe, "-c", sumoConfig])
  traci.simulation[:subscribe](varIDs=(tc.VAR_DEPARTED_VEHICLES_IDS, tc.VAR_ARRIVED_VEHICLES_IDS))
  viewer = Viewer(screen_width, screen_height)
- background = Image("/media/mSATA/UM/Upper routing simulation/SUMOdata/f_background2.png", screen_width, screen_height)
+ background = Image(BACKGROUND_FILE, screen_width, screen_height)
  viewer[:add_geom](background)
- fnames = [
-    "/home/boqi/Pictures/noun_Car_1822714_000000.png",
-    "/home/boqi/Pictures/noun_Car_1822714_51A7F9.png",
-    "/home/boqi/Pictures/noun_Car_1822714_70c1b3.png",
-    "/home/boqi/Pictures/noun_Car_1822714_70C041.png",
-    "/home/boqi/Pictures/noun_Car_1822714_B36AE2.png",
-    "/home/boqi/Pictures/noun_Car_1822714_EC5D57.png",
-    "/home/boqi/Pictures/noun_Car_1822714_F38F19.png"]
+
  carhandler = CarHandler(Float64[], Float64[], Int[], Bool[])
- cars = ImageCompound(fnames, 20, 20, carhandler)
+ cars = ImageCompound(CARICONS, 20, 20, carhandler)
 
  viewer[:add_geom](cars)
  for e in EDGES

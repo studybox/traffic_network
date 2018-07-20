@@ -2,7 +2,6 @@ SUMO = "sumo"
 SUMOGUI = "sumo-gui"
 SUMO_HOME = "/media/mSATA/UM/Simulation/sumo"
 SUMO_CONFIG = "/media/mSATA/UM/Simulation/f_reduced2_AnnArbor.sumocfg"
-unshift!(PyVector(pyimport("sys")["path"]), os.path[:join](SUMO_HOME, "tools"))
 #XBOUNDLEFT = 265395
 #XBOUNDRIGHT = 281180
 #YBOUNDTOP = 4691486
