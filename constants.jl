@@ -1,0 +1,12 @@
+SUMO = "sumo"
+SUMOGUI = "sumo-gui"
+SUMO_HOME = "/media/mSATA/UM/Simulation/sumo"
+unshift!(PyVector(pyimport("sys")["path"]), os.path[:join](SUMO_HOME, "tools"))
+#XBOUNDLEFT = 265395
+#XBOUNDRIGHT = 281180
+#YBOUNDTOP = 4691486
+#YBOUNDBOT = 4676351
+XBOUNDLEFT = 262000
+XBOUNDRIGHT = 291000
+YBOUNDTOP = 4694500
+YBOUNDBOT = 4670500
