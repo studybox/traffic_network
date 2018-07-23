@@ -1,4 +1,4 @@
-NUMSTUDY = 100
+NUMSTUDY = 500
 include("constants.jl")
 include("rendering.jl")
 using PyCall
@@ -10,6 +10,7 @@ unshift!(PyVector(pyimport("sys")["path"]), os.path[:join](SUMO_HOME, "tools"))
 @pyimport sumolib
 screen_width = 1000
 screen_height = 1000
+side_screen_width, side_screen_height = 800, 1000
 world_width = XBOUNDRIGHT-XBOUNDLEFT
 world_widthx = XBOUNDRIGHT-XBOUNDLEFT
 scalex = screen_width/world_widthx
@@ -69,9 +70,38 @@ netStatus = Dict()
 
 ANNARBOR = sumolib.net[:readNet]("/media/mSATA/UM/Simulation/f_AnnArbor1.6.net.xml")
 EDGES = ANNARBOR[:getEdges]()
+NET = Dict{String,Int}()
+for e in EDGES
+    NET[e[:getID]()]  = -1
+end
+open("/media/mSATA/UM/Simulation/finalclusters.txt") do f
+    this_zone = -1
+    for line in eachline(f)
+        res = split(line)
+        if res[1] == "Zone"
+            this_zone = parse(Int, res[2])
+        elseif res[1] == "Links"
+            for lidx in res[2:end]
+                ln = data_links[:link][parse(Int, lidx)]
+                if string(ln, "-0") in keys(NET)
+                    NET[string(ln, "-0")] = this_zone
+                end
+                if string(ln, "-1") in keys(NET)
+                    NET[string(ln, "-1")] = this_zone
+                end
+                if string(ln, "-1-Pocket") in keys(NET)
+                    NET[string(ln, "-1-Pocket")] = this_zone
+                end
+                if string(ln, "-0-Pocket") in keys(NET)
+                    NET[string(ln, "-0-Pocket")] = this_zone
+                end
+            end
+        end
+    end
+end
 function _checkBackInitialPositions(vehicleID, start, dest, edge, pos, time, speed)
  if !(vehicleID in keys(backgroundStatus))
-   backgroundStatus[vehicleID] = BackStatus(Int(time/1000), [edge], [speed], [Int(time/1000)], Int[], [speed], Float64[], Float64[], Float64[], dest==edge)
+   backgroundStatus[vehicleID] = Status(start, dest, [Int(time/1000)], [edge], [pos], [speed], dest==edge)
  end
 end
 function _checkInitialPositions(vehicleID, start, dest, edge, pos, time, speed, viewer, cars, carhandler)
@@ -89,23 +119,25 @@ function _checkInitialPositions(vehicleID, start, dest, edge, pos, time, speed, 
  end
 end
 
-function doStep(viewer, cars, carhandler)
+function doStep(viewer, cars, carhandler, datas)
     traci.simulationStep()
     #moveNodes = []
     subscribes = traci.vehicle[:getSubscriptionResults]()
     time = traci.simulation[:getCurrentTime]()
-    #=
-    count = 0
-    for (veh, subs) in subscribes
-        if count <= 400
-            route = traci.vehicle[:getRoute](veh)
+
+    #count = 0
+    if time%60 == 0
+        datas["bar2"] = zeros(Int, 14)
+        datas["bar3"] = zeros(14)
+        datas["bar3count"] = ones(14)*0.000001
+        for (veh, subs) in subscribes
+            edge = traci.vehicle[:getRoadID](veh)
             speed = traci.vehicle[:getSpeed](veh)
-            pos = traci.vehicle[:getPosition](veh)
-            #push!(moveNodes, (veh, route[1], route[end], subs[tc.VAR_ROAD_ID], pos, speed))
-            count = count + 1
+            datas["bar2"][NET[edge]] += 1
+            datas["bar3"][NET[edge]] += speed
+            datas["bar3count"][NET[edge]] += 1
         end
     end
-    =#
     departed = traci.simulation[:getSubscriptionResults]()[tc.VAR_DEPARTED_VEHICLES_IDS]
     arrived = traci.simulation[:getSubscriptionResults]()[tc.VAR_ARRIVED_VEHICLES_IDS]
     for v in departed
@@ -118,7 +150,14 @@ function doStep(viewer, cars, carhandler)
         dest = route[end]
         edge = traci.vehicle[:getRoadID](v)
         #push!(moveNodes, (v, route[1], route[end], subs[tc.VAR_ROAD_ID], pos, speed))
+        _checkBackInitialPositions(v, start, dest, edge, pos, time, speed)
         _checkInitialPositions(v, start, dest, edge, pos, time, speed, viewer, cars, carhandler)
+        datas["bar1"][NET[start]][1] += 1
+        datas["bar1"][NET[dest]][2] += 1
+    end
+    for v in arrived
+        datas["bar1"][NET[backgroundStatus[v].start]][1] -= 1
+        datas["bar1"][NET[backgroundStatus[v].dest]][2] -= 1
     end
     for vehicleID in keys(vehicleStatus)
         if vehicleID in arrived && vehicleStatus[vehicleID].arrived==false
@@ -177,6 +216,32 @@ function main(T)
  traci.start([sumoExe, "-c", sumoConfig])
  traci.simulation[:subscribe](varIDs=(tc.VAR_DEPARTED_VEHICLES_IDS, tc.VAR_ARRIVED_VEHICLES_IDS))
  viewer = Viewer(screen_width, screen_height)
+ sideviewer = Viewer(side_screen_width,side_screen_height, 1000, 0)
+ ymargin = 40
+ xmargin = 20
+ plotwidth = 760
+ plotheight = 200
+ datas = Dict{String, Any}()
+ datas["bar1"] = [[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0]]
+ datas["bar2"] = zeros(Int, 14)
+ datas["bar3"] = zeros(14)
+ datas["bar3count"] = ones(14)*0.000001
+ bar1 = BarPlot(plotwidth,plotheight,xmargin,ymargin)
+ bar1[:set_axis](["Zone ID", "Loc Count"])
+ bar1[:add_data](datas["bar1"], color = COLORPOOL, renew=true)
+ bar2 = BarPlot(plotwidth,plotheight,xmargin,2*ymargin+plotheight)
+ bar2[:set_axis](["Zone ID", "Veh Count"])
+ bar2[:add_data](datas["bar2"], color = COLORPOOL, renew=true)
+ bar3 = BarPlot(plotwidth,plotheight,xmargin,3*ymargin+2*plotheight)
+ bar3[:add_data](datas["bar3"]./datas["bar3count"], color = COLORPOOL, renew=true)
+ bar3[:set_axis](["Zone ID", "Travel Speed"])
+ bar4 = BarPlot(plotwidth,plotheight,xmargin,4*ymargin+3*plotheight)
+ bar4[:set_axis](["Zone ID", "Energy Cost Rate"])
+
+ sideviewer[:add_geom](bar1)
+ sideviewer[:add_geom](bar2)
+ sideviewer[:add_geom](bar3)
+ sideviewer[:add_geom](bar4)
  background = Image(BACKGROUND_FILE, screen_width, screen_height)
  viewer[:add_geom](background)
 
@@ -191,8 +256,13 @@ function main(T)
  t = 0
  while t<T
   #println(t)
-  doStep(viewer, cars, carhandler)
+  doStep(viewer, cars, carhandler, datas)
   viewer[:render]()
+  bar1[:add_data](datas["bar1"])
+  bar2[:add_data](datas["bar2"])
+  bar3[:add_data](datas["bar3"]./datas["bar3count"])
+  sideviewer[:render]()
+
   t=t+1
   if length(vehicleStatus) == NUMSTUDY
    simulationend = true
@@ -208,4 +278,5 @@ function main(T)
 
  traci.close()
  viewer[:close]()
+ sideviewer[:close]()
 end

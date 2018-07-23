@@ -1,3 +1,4 @@
+# Used for rendering
 using PyCall
 @pyimport pyglet
 @pyimport sys
@@ -17,7 +18,7 @@ type viewer
     transform::Any
 end
 =#
-RAD2DEG = 57.29577951308232
+RAD2DEG = 57.29577951308232 # A magical number
 function _add_attrs(geom, attrs)
     if "color" in keys(attrs)
         geom[:set_color](attrs["color"][1], attrs["color"][2], attrs["color"][3])
@@ -28,11 +29,12 @@ function _add_attrs(geom, attrs)
 end
 
 @pydef mutable struct Viewer
-    function __init__(self, width::Int, height::Int, display=nothing)
+    function __init__(self, width::Int, height::Int, x=0, y=0, display=nothing)
         self[:width] = width
         self[:height] = height
         self[:window] = pyglet.window[:Window](width=width, height=height, display=display)
         self[:window][:on_close] = self[:window_closed_by_user]
+        self[:window][:set_location](x, y)
         self[:isopen] = true
         self[:geoms] = Any[]
         self[:onetime_geoms] = Any[]
@@ -288,13 +290,135 @@ end
             g[:attrs] = [a for a in g[:attrs] if !py"isinstance($a, $Color)"]
         end
     end
+    function add_geom(self, g)
+        self[:gs] = push!(self[:gs], g)
+    end
     function render1(self)
         for g in self[:gs]
             g[:render]()
         end
     end
 end
+@pydef mutable struct Text <: Geom
+    function __init__(self,text, x, y, font_size=11, font_name="Times New Roman")
+        Geom[:__init__](self)
+        self[:attrs] = []
+        self[:label] = pyglet.text[:Label](text,
+                                    font_name=font_name,
+                                    font_size=font_size,
+                                    x=x, y=y,
+                                    color=(0, 0, 0, 255),
+                                    anchor_x="center", anchor_y="center")
+    end
+    function render1(self)
+        self[:label][:draw]()
+    end
+end
+@pydef mutable struct BarPlot <: Geom
+    function __init__(self, width, height, x, y)
+        Geom[:__init__](self)
+        self[:x] = x
+        self[:y] = y
+        self[:width] = width
+        self[:height] = height
+        xaxis = Line((x, y), (x+width, y))
+        yaxis = Line((x, y), (x, y+height))
+        xarrow = FilledPolygon([(x+width+(5*sqrt(3)), y), (x+width, y+5), (x+width, y-5)])
+        yarrow = FilledPolygon([(x, y+height+(5*sqrt(3))), (x-5, y+height), (x+5, y+height)])
+        xaxis[:set_linewidth](1.5)
+        yaxis[:set_linewidth](1.5)
+        #xaxis[:set_color](1,0,0)
+        #yaxis[:set_color](1,0,0)
+        #xarrow[:set_color](1,0,0)
+        #yarrow[:set_color](1,0,0)
+        self[:base] = [xarrow,xaxis,yarrow,yaxis]
 
+        self[:bars] = Compound([])
+        self[:maxcount] = 50
+    end
+    function set_axis(self, texts)
+        xlabel = Text(texts[1], self[:x]+self[:width]/2, self[:y]-10)
+        ylabel = Text(texts[2], 0,0)
+        ylabel[:add_attr](Transform(translation=(self[:x]-10, self[:y]+self[:height]/2), rotation=pi/2))
+        self[:base] = push!(self[:base], xlabel)
+        self[:base] = push!(self[:base], ylabel)
+    end
+    function add_data(self, data; color=nothing, renew=false)
+        maxcount = -1
+        for group in data
+            for elem in group
+                if elem > maxcount
+                     maxcount=elem
+                end
+            end
+        end
+        self[:maxcount] = Int(ceil(maxcount/50)*50)
+        k = 4
+        margin = self[:width]/((k+1)*length(data)+1)
+        barwidth = k*margin
+        if renew
+            self[:bars][:gs] = []
+            for (idx,group) in enumerate(data)
+                c = color[idx]
+                if length(group) == 1
+                    bar = make_polygon(((self[:x]+margin*idx+barwidth*(idx-1), self[:y]+0.75),
+                                        (self[:x]+margin*idx+barwidth*idx, self[:y]+0.75),
+                                        (self[:x]+margin*idx+barwidth*idx, self[:y]+0.75+(group[1]/self[:maxcount])*self[:height]),
+                                        (self[:x]+margin*idx+barwidth*(idx-1), self[:y]+0.75+(group[1]/self[:maxcount])*self[:height])), true)
+                    bar[:set_color](c[1], c[2], c[3])
+                    self[:bars][:add_geom](bar)
+                elseif length(group) == 2
+                    bar1 = make_polygon(((self[:x]+margin*idx+barwidth*(idx-1), self[:y]+0.75),
+                                        (self[:x]+margin*idx+barwidth*(idx-1)+(barwidth/2-1.0), self[:y]+0.75),
+                                        (self[:x]+margin*idx+barwidth*(idx-1)+(barwidth/2-1.0), self[:y]+0.75+(group[1]/self[:maxcount])*self[:height]),
+                                        (self[:x]+margin*idx+barwidth*(idx-1), self[:y]+0.75+(group[1]/self[:maxcount])*self[:height])), true)
+                    bar1[:set_color](c[1], c[2], c[3])
+                    bar2 = make_polygon(((self[:x]+margin*idx+barwidth*(idx-1)+(barwidth/2+1.0), self[:y]+0.75),
+                                        (self[:x]+margin*idx+barwidth*(idx-1)+barwidth, self[:y]+0.75),
+                                        (self[:x]+margin*idx+barwidth*(idx-1)+barwidth, self[:y]+0.75+(group[2]/self[:maxcount])*self[:height]),
+                                        (self[:x]+margin*idx+barwidth*(idx-1)+(barwidth/2+1.0), self[:y]+0.75+(group[2]/self[:maxcount])*self[:height])), false)
+                    bar2[:set_color](c[1], c[2], c[3])
+                    self[:bars][:add_geom](bar1)
+                    self[:bars][:add_geom](bar2)
+                else
+                    throw("unimplemented")
+                end
+            end
+            #println(length(self[:bars][:gs]))
+        else
+            for (idx,group) in enumerate(data)
+                if length(group) == 1
+                    self[:bars][:gs][idx][:v] = ((self[:x]+margin*idx+barwidth*(idx-1), self[:y]+0.75),
+                                                 (self[:x]+margin*idx+barwidth*idx, self[:y]+0.75),
+                                                 (self[:x]+margin*idx+barwidth*idx, self[:y]+0.75+(group[1]/self[:maxcount])*self[:height]),
+                                                 (self[:x]+margin*idx+barwidth*(idx-1), self[:y]+0.75+(group[1]/self[:maxcount])*self[:height]))
+                elseif length(group) == 2
+                    #println(length(self[:bars][:gs]))
+                    #println((idx-1)*2+1)
+                    self[:bars][:gs][(idx-1)*2+1][:v] = ((self[:x]+margin*idx+barwidth*(idx-1), self[:y]+0.75),
+                                                         (self[:x]+margin*idx+barwidth*(idx-1)+(barwidth/2-1.0), self[:y]+0.75),
+                                                         (self[:x]+margin*idx+barwidth*(idx-1)+(barwidth/2-1.0), self[:y]+0.75+(group[1]/self[:maxcount])*self[:height]),
+                                                         (self[:x]+margin*idx+barwidth*(idx-1), self[:y]+0.75+(group[1]/self[:maxcount])*self[:height]))
+                    self[:bars][:gs][(idx-1)*2+2][:v] = ((self[:x]+margin*idx+barwidth*(idx-1)+(barwidth/2+1.0), self[:y]+0.75),
+                                                         (self[:x]+margin*idx+barwidth*(idx-1)+barwidth, self[:y]+0.75),
+                                                         (self[:x]+margin*idx+barwidth*(idx-1)+barwidth, self[:y]+0.75+(group[2]/self[:maxcount])*self[:height]),
+                                                         (self[:x]+margin*idx+barwidth*(idx-1)+(barwidth/2+1.0), self[:y]+0.75+(group[2]/self[:maxcount])*self[:height]))
+                else
+                    throw("unimplemented")
+                end
+            end
+        end
+    end
+    function add_bars(self, bar)
+        self[:bars] = push!(self[:bars], bar)
+    end
+    function render1(self)
+        self[:bars][:render]()
+        for g in self[:base]
+            g[:render]()
+        end
+    end
+end
 @pydef mutable struct PolyLine <:Geom
     function __init__(self, v, close)
         Geom[:__init__](self)
@@ -330,6 +454,9 @@ end
         pygl.glVertex2f(self[:dest][1], self[:dest][2])
         pygl.glEnd()
     end
+    function set_linewidth(self, x)
+        self[:linewidth][:stroke] = x
+    end
 end
 
 @pydef mutable struct Image <: Geom
@@ -354,6 +481,7 @@ end
         end
     end
 end
+
 @pydef mutable struct ImageCompound <: Geom
     function __init__(self, fnames, width, height, handler)
         Geom[:__init__](self)
